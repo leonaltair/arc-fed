@@ -1,0 +1,13 @@
+# Apply in cluster-1's context. See scripts/setup-cluster.sh.
+apiVersion: actions.github.com/v1alpha1
+kind: RunnerDeployment
+metadata:
+  name: arc-runner-cluster-1
+  namespace: arc-runners
+spec:
+  replicas: 2
+  template:
+    spec:
+      repository: leonaltair/arc-fed          # repo-level runners for this repo
+      labels:
+        - cluster:cluster-1                  # targeted by runs-on in smoke.yml
