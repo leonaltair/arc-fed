@@ -1,0 +1,95 @@
+name: Verify ARC
+
+# Verifies that GitHub Actions dispatches jobs to ARC runners in two k8s
+# clusters (cluster-1, cluster-2), routed by the `cluster:<name>` runner label.
+#
+# Each cluster must expose a runner set labeled:
+#   self-hosted, cluster:cluster-1   (cluster-1)
+#   self-hosted, cluster:cluster-2   (cluster-2)
+# See docs/arc-runner-setup.md for the matching RunnerDeployment manifests.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      cluster:
+        description: Cluster to run on
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - cluster-1
+          - cluster-2
+
+concurrency:
+  group: verify-arc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Smoke (${{ matrix.cluster }})
+    runs-on: [self-hosted, cluster:${{ matrix.cluster }}]
+    # On manual dispatch, restrict to the selected cluster; on push run both.
+    if: >-
+      ${{ github.event_name != 'workflow_dispatch' ||
+          github.event.inputs.cluster == 'all' ||
+          github.event.inputs.cluster == matrix.cluster }}
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        cluster: [cluster-1, cluster-2]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cluster identity
+        run: |
+          echo "::notice::Dispatched to cluster=${{ matrix.cluster }} on runner=${RUNNER_NAME:-unknown}"
+          echo "matrix.cluster      : ${{ matrix.cluster }}"
+          echo "github.repository    : ${{ github.repository }}"
+          echo "github.run_id        : ${{ github.run_id }}"
+          echo "runner.name         : ${RUNNER_NAME:-<unset>}"
+          echo "runner.os           : ${RUNNER_OS:-<unset>}"
+          echo "runner.arch         : ${RUNNER_ARCH:-<unset>}"
+          echo "runner.labels       : ${RUNNER_LABELS:-<unset>}"
+          echo "hostname            : $(hostname)"
+          echo "uname               : $(uname -a)"
+
+      - name: Verify label routing
+        # Confirms the runner that picked up this job advertises the expected
+        # cluster label — i.e. the job was routed to the intended cluster.
+        run: |
+          expected="cluster:${{ matrix.cluster }}"
+          if [ -z "${RUNNER_LABELS:-}" ]; then
+            echo "::error::RUNNER_LABELS is empty; runner did not expose labels."
+            exit 1
+          fi
+          # RUNNER_LABELS is a comma-separated list: 'self-hosted,cluster:cluster-1'
+          if echo "${RUNNER_LABELS}" | grep -qE "(^|,)${expected}(,|$)"; then
+            echo "::notice::Label routing OK — runner advertises '${expected}'."
+          else
+            echo "::error::Label routing FAILED. Expected '${expected}' in [${RUNNER_LABELS}]."
+            exit 1
+          fi
+
+      - name: Collect runner environment
+        # Dumps the rest of the runner-* env vars and workspace info for
+        # ARC/debugging: confirms pod identity without needing kubectl in-image.
+        run: |
+          {
+            echo '## Runner environment'
+            echo '| key | value |'
+            echo '| --- | --- |'
+            for kv in RUNNER_NAME RUNNER_OS RUNNER_ARCH RUNNER_LABELS \
+                      RUNNER_TOOL_CACHE RUNNER_TEMP RUNNER_WORKSPACE; do
+              echo "| ${kv} | ${!kv:-<unset>} |"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Result
+        run: |
+          echo "::notice::cluster-${{ matrix.cluster }} smoke test passed."
