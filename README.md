@@ -23,17 +23,21 @@ See [`docs/arc-runner-setup.md`](docs/arc-runner-setup.md) for the exact
 
 ## The verification workflow
 
-[`.github/workflows/verify-arc.yml`](.github/workflows/verify-arc.yml) runs a
-matrix over the two clusters. Each leg checks out the repo, prints cluster and
-runner identity, and asserts the job landed on the expected `cluster:` label.
+[`.github/workflows/verify-arc.yml`](.github/workflows/verify-arc.yml) is the
+entry point: it fires on every push to `main` and via manual dispatch (which can
+target a single cluster: `all` / `cluster-1` / `cluster-2`). For each cluster
+it calls the reusable [`.github/workflows/smoke.yml`](.github/workflows/smoke.yml),
+which runs on that cluster's labeled runner, prints cluster and runner identity,
+and asserts the job landed on the expected `cluster:` label.
 
-It fires on every push to `main` and via manual dispatch. Manual dispatch lets
-you target a single cluster (`all` / `cluster-1` / `cluster-2`) for isolation.
+> Note: `matrix` can't be referenced in a job-level `if` (evaluated before matrix
+> expansion), so each cluster is a separate caller job delegating to `smoke.yml`.
 
 ## Repository layout
 
 ```
-.github/workflows/verify-arc.yml   # matrix smoke test
+.github/workflows/verify-arc.yml   # entry point: triggers + per-cluster caller jobs
+.github/workflows/smoke.yml       # reusable: runs on a cluster's labeled runner
 docs/arc-runner-setup.md            # ARC RunnerDeployment manifests per cluster
 README.md
 .gitignore

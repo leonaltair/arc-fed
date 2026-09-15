@@ -1,0 +1,68 @@
+name: Smoke (reusable)
+
+# Reusable workflow called once per cluster by verify-arc.yml. Receives the
+# target cluster name and runs on its labeled runner set.
+
+on:
+  workflow_call:
+    inputs:
+      cluster:
+        required: true
+        type: string
+
+jobs:
+  smoke:
+    name: "Smoke (${{ inputs.cluster }})"
+    runs-on: ${{ fromJSON(format('["self-hosted","cluster:{0}"]', inputs.cluster)) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Cluster identity
+        run: |
+          echo "::notice::Dispatched to cluster=${{ inputs.cluster }} on runner=${RUNNER_NAME:-unknown}"
+          echo "inputs.cluster     : ${{ inputs.cluster }}"
+          echo "github.repository  : ${{ github.repository }}"
+          echo "github.run_id      : ${{ github.run_id }}"
+          echo "runner.name        : ${RUNNER_NAME:-<unset>}"
+          echo "runner.os          : ${RUNNER_OS:-<unset>}"
+          echo "runner.arch        : ${RUNNER_ARCH:-<unset>}"
+          echo "runner.labels      : ${RUNNER_LABELS:-<unset>}"
+          echo "hostname           : $(hostname)"
+          echo "uname              : $(uname -a)"
+
+      - name: Verify label routing
+        # Confirms the runner that picked up this job advertises the expected
+        # cluster label — i.e. the job was routed to the intended cluster.
+        run: |
+          expected="cluster:${{ inputs.cluster }}"
+          if [ -z "${RUNNER_LABELS:-}" ]; then
+            echo "::error::RUNNER_LABELS is empty; runner did not expose labels."
+            exit 1
+          fi
+          # RUNNER_LABELS is a comma-separated list: 'self-hosted,cluster:cluster-1'
+          if echo "${RUNNER_LABELS}" | grep -qE "(^|,)${expected}(,|$)"; then
+            echo "::notice::Label routing OK — runner advertises '${expected}'."
+          else
+            echo "::error::Label routing FAILED. Expected '${expected}' in [${RUNNER_LABELS}]."
+            exit 1
+          fi
+
+      - name: Collect runner environment
+        # Dumps the runner-* env vars and workspace info for ARC/debugging:
+        # confirms pod identity without needing kubectl in-image.
+        run: |
+          {
+            echo '## Runner environment — ${{ inputs.cluster }}'
+            echo '| key | value |'
+            echo '| --- | --- |'
+            for kv in RUNNER_NAME RUNNER_OS RUNNER_ARCH RUNNER_LABELS \
+                      RUNNER_TOOL_CACHE RUNNER_TEMP RUNNER_WORKSPACE; do
+              echo "| ${kv} | ${!kv:-<unset>} |"
+            done
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Result
+        run: |
+          echo "::notice::${{ inputs.cluster }} smoke test passed."
