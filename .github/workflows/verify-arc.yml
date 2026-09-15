@@ -29,8 +29,10 @@ concurrency:
 
 jobs:
   smoke:
-    name: Smoke (${{ matrix.cluster }})
-    runs-on: [self-hosted, cluster:${{ matrix.cluster }}]
+    name: "Smoke (${{ matrix.cluster }})"
+    # Dynamic runs-on via fromJSON to avoid YAML flow-context ambiguity with
+    # the `cluster:<name>` colon label. Produces ["self-hosted","cluster:cluster-N"].
+    runs-on: ${{ fromJSON(format('["self-hosted","cluster:{0}"]', matrix.cluster)) }}
     # On manual dispatch, restrict to the selected cluster; on push run both.
     if: >-
       ${{ github.event_name != 'workflow_dispatch' ||
